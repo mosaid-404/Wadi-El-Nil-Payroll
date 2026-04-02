@@ -847,6 +847,87 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: {
 
   return (
     <div className="space-y-6">
+      {/* Hidden Receipt for Image Generation */}
+      <div className="fixed -left-[9999px] top-0 no-print">
+        <div ref={receiptRef} className="bg-white p-8 w-[800px] font-sans" dir="rtl">
+          <div className="text-center border-b-2 border-slate-900 pb-4 mb-6">
+            <h1 className="text-2xl font-bold">شركة وادي النيل</h1>
+            <p className="text-sm">بيان مفردات القبض</p>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            <div><span className="font-bold">السائق:</span> {driver.name}</div>
+            <div><span className="font-bold">الكود:</span> {driver.code}</div>
+            <div><span className="font-bold">المصنع:</span> {driver.factory}</div>
+            <div><span className="font-bold">التاريخ:</span> {format(new Date(), 'yyyy/MM/dd')}</div>
+          </div>
+
+          <table className="w-full border-collapse border border-slate-900 mb-6 text-sm">
+            <thead>
+              <tr className="bg-slate-100">
+                <th className="border border-slate-900 p-2 text-right">البيان</th>
+                <th className="border border-slate-900 p-2 text-center">العدد</th>
+                <th className="border border-slate-900 p-2 text-center">السعر</th>
+                <th className="border border-slate-900 p-2 text-center">الإجمالي</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shifts.map((s, i) => (
+                <tr key={i}>
+                  <td className="border border-slate-900 p-2">{s.description}</td>
+                  <td className="border border-slate-900 p-2 text-center">{s.count}</td>
+                  <td className="border border-slate-900 p-2 text-center">{s.price}</td>
+                  <td className="border border-slate-900 p-2 text-center">{s.count * s.price}</td>
+                </tr>
+              ))}
+              <tr className="bg-slate-50 font-bold">
+                <td colSpan={3} className="border border-slate-900 p-2 text-left">إجمالي الورادي</td>
+                <td className="border border-slate-900 p-2 text-center">{totalShifts}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div className="grid grid-cols-2 gap-8 mb-6 text-sm">
+            <div>
+              <h3 className="font-bold border-b border-slate-900 mb-2">الخصومات</h3>
+              {deductions.map((d, i) => (
+                <div key={i} className="flex justify-between py-1">
+                  <span>{d.description}</span>
+                  <span>{d.amount}</span>
+                </div>
+              ))}
+              <div className="flex justify-between font-bold border-t border-slate-900 mt-2 pt-1">
+                <span>الإجمالي</span>
+                <span>{totalDeductions}</span>
+              </div>
+            </div>
+            <div>
+              <h3 className="font-bold border-b border-slate-900 mb-2">السلف</h3>
+              {advances.map((a, i) => (
+                <div key={i} className="flex justify-between py-1">
+                  <span>{a.description}</span>
+                  <span>{a.amount}</span>
+                </div>
+              ))}
+              <div className="flex justify-between font-bold border-t border-slate-900 mt-2 pt-1">
+                <span>الإجمالي</span>
+                <span>{totalAdvances}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-2 border-slate-900 p-4 rounded-lg text-center">
+            <div className="text-lg font-bold">صافي القبض المستحق: {finalTotal} ج.م</div>
+            <div className="text-sm mt-1">طريقة الدفع: {paymentMethod || 'لم يحدد'}</div>
+          </div>
+
+          <div className="mt-12 flex justify-between text-sm">
+            <div className="text-center w-32 border-t border-slate-900 pt-2">توقيع السائق</div>
+            <div className="text-center w-32 border-t border-slate-900 pt-2">توقيع الحسابات</div>
+          </div>
+        </div>
+      </div>
+
       {/* UI Editor */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 no-print">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
