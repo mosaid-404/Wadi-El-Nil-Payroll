@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "Driver": {
+      "title": "Driver",
+      "description": "بيانات السائق",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "description": "كود السائق" },
+        "name": { "type": "string", "description": "اسم السائق" },
+        "factory": { "type": "string", "description": "المصنع" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "name", "factory"]
+    },
+    "Payroll": {
+      "title": "Payroll",
+      "description": "بيانات القبض الشهري للسائق",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string", "description": "معرف السائق" },
+        "month": { "type": "integer", "description": "الشهر (1-12)" },
+        "year": { "type": "integer", "description": "السنة" },
+        "shifts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "description": { "type": "string" },
+              "count": { "type": "number" },
+              "price": { "type": "number" }
+            }
+          }
+        },
+        "deductions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "amount": { "type": "number" },
+              "description": { "type": "string" },
+              "date": { "type": "string", "format": "date" }
+            }
+          }
+        },
+        "advances": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "amount": { "type": "number" },
+              "description": { "type": "string" },
+              "date": { "type": "string", "format": "date" }
+            }
+          }
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["نقداً", "فيزا", "شيك", "تحويل بنكي"]
+        },
+        "totalAmount": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["driverId", "month", "year"]
+    }
+  },
+  "firestore": {
+    "/drivers": {
+      "schema": "Driver",
+      "description": "مجموعة السائقين"
+    },
+    "/payrolls": {
+      "schema": "Payroll",
+      "description": "مجموعة بيانات القبض"
+    }
+  }
+}

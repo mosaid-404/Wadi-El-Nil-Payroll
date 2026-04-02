@@ -1,0 +1,30 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: drivers
+    // Fields: name (string), factory (string), createdAt (timestamp)
+    //
+    // Collection: payrolls
+    // Fields: driverId (string), month (int), year (int), shifts (array), 
+    //         deductions (array), advances (array), paymentMethod (string),
+    //         totalAmount (number), updatedAt (timestamp)
+    // ===============================================================
+
+    function isAuthenticated() {
+      return true; // For this specific app, we are using a hardcoded login in the UI
+      // In a production app, we would use request.auth != null
+    }
+
+    match /drivers/{driverId} {
+      allow read, write: if true;
+    }
+
+    match /payrolls/{payrollId} {
+      allow read, write: if true;
+    }
+  }
+}
