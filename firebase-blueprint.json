@@ -8,9 +8,21 @@
         "code": { "type": "string", "description": "كود السائق" },
         "name": { "type": "string", "description": "اسم السائق" },
         "factory": { "type": "string", "description": "المصنع" },
+        "notes": { "type": "string", "description": "ملاحظات السائق" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["code", "name", "factory"]
+    },
+    "GeneralNote": {
+      "title": "General Note",
+      "description": "ملاحظة عامة بالتاريخ",
+      "type": "object",
+      "properties": {
+        "content": { "type": "string", "description": "محتوى الملاحظة" },
+        "date": { "type": "string", "format": "date-time", "description": "تاريخ الملاحظة" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["content", "date"]
     },
     "Payroll": {
       "title": "Payroll",
@@ -71,6 +83,10 @@
     "/payrolls": {
       "schema": "Payroll",
       "description": "مجموعة بيانات القبض"
+    },
+    "/generalNotes": {
+      "schema": "GeneralNote",
+      "description": "مجموعة الملاحظات العامة"
     }
   }
 }

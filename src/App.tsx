@@ -55,6 +55,14 @@ interface Driver {
   code: string;
   name: string;
   factory: string;
+  notes?: string;
+  createdAt: Timestamp;
+}
+
+interface GeneralNote {
+  id: string;
+  content: string;
+  date: string;
   createdAt: Timestamp;
 }
 
@@ -104,11 +112,13 @@ export default function App() {
 
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [payrolls, setPayrolls] = useState<Record<string, Payroll>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [factoryFilter, setFactoryFilter] = useState('الكل');
-  const [activeTab, setActiveTab] = useState<'drivers' | 'payroll' | 'reports'>('payroll');
+  const [activeTab, setActiveTab] = useState<'drivers' | 'payroll' | 'reports' | 'notes'>('payroll');
+  const [generalNotes, setGeneralNotes] = useState<GeneralNote[]>([]);
+  const [printData, setPrintData] = useState<{ driver: Driver, payroll: Partial<Payroll> } | null>(null);
 
   // Fetch Settings
   useEffect(() => {
@@ -119,6 +129,11 @@ export default function App() {
     });
     return () => unsub();
   }, []);
+
+  const selectedDriver = useMemo(() => 
+    drivers.find(d => d.id === selectedDriverId), 
+    [drivers, selectedDriverId]
+  );
 
   // Login handler
   const handleLogin = (e: React.FormEvent) => {
@@ -163,17 +178,51 @@ export default function App() {
     return () => unsubscribe();
   }, [isLoggedIn, currentMonth]);
 
+  // Fetch General Notes
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const q = query(collection(db, 'generalNotes'), orderBy('date', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const notesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as GeneralNote));
+      setGeneralNotes(notesData);
+    });
+    return () => unsubscribe();
+  }, [isLoggedIn]);
+
   // Add Driver
-  const addDriver = async (code: string, name: string, factory: string) => {
+  const addDriver = async (code: string, name: string, factory: string, notes: string = '') => {
     try {
       await addDoc(collection(db, 'drivers'), {
         code,
         name,
         factory,
+        notes,
         createdAt: Timestamp.now()
       });
     } catch (err) {
       console.error("Error adding driver:", err);
+    }
+  };
+
+  // Add General Note
+  const addGeneralNote = async (content: string, date: string) => {
+    try {
+      await addDoc(collection(db, 'generalNotes'), {
+        content,
+        date,
+        createdAt: Timestamp.now()
+      });
+    } catch (err) {
+      console.error("Error adding general note:", err);
+    }
+  };
+
+  // Delete General Note
+  const deleteGeneralNote = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'generalNotes', id));
+    } catch (err) {
+      console.error("Error deleting general note:", err);
     }
   };
 
@@ -196,7 +245,7 @@ export default function App() {
       shifts: data.shifts || currentPayroll?.shifts || [],
       deductions: data.deductions || currentPayroll?.deductions || [],
       advances: data.advances || currentPayroll?.advances || [],
-      paymentMethod: data.paymentMethod || currentPayroll?.paymentMethod || "نقداً",
+      paymentMethod: data.paymentMethod !== undefined ? data.paymentMethod : (currentPayroll?.paymentMethod || ""),
       totalAmount,
       updatedAt: Timestamp.now()
     };
@@ -226,7 +275,7 @@ export default function App() {
         const prevData = prevDoc.docs[0].data() as Payroll;
         // Copy shifts but reset counts to 0
         const newShifts = prevData.shifts.map(s => ({ ...s, count: 0 }));
-        await savePayroll(driverId, { shifts: newShifts });
+        await savePayroll(driverId, { shifts: newShifts, paymentMethod: "" });
       }
     } catch (err) {
       console.error("Error carrying over rates:", err);
@@ -362,7 +411,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900" dir="rtl">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 no-print">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center overflow-hidden">
@@ -415,7 +464,7 @@ export default function App() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto p-4 pb-24">
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+        <div className="flex gap-2 mb-6 overflow-x-auto pb-2 no-print">
           <TabButton 
             active={activeTab === 'payroll'} 
             onClick={() => setActiveTab('payroll')}
@@ -434,6 +483,12 @@ export default function App() {
             icon={<BarChart3 size={18} />}
             label="التقارير"
           />
+          <TabButton 
+            active={activeTab === 'notes'} 
+            onClick={() => setActiveTab('notes')}
+            icon={<FileText size={18} />}
+            label="الملاحظات العامة"
+          />
         </div>
 
         <AnimatePresence mode="wait">
@@ -446,7 +501,7 @@ export default function App() {
               className="grid grid-cols-1 lg:grid-cols-12 gap-6"
             >
               {/* Drivers List Sidebar */}
-              <div className="lg:col-span-4 space-y-4">
+              <div className="lg:col-span-4 space-y-4 no-print">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
                   <div className="space-y-3 mb-4">
                     <div className="relative">
@@ -485,10 +540,10 @@ export default function App() {
                       .map(driver => (
                         <button
                           key={driver.id}
-                          onClick={() => setSelectedDriver(driver)}
+                          onClick={() => setSelectedDriverId(driver.id)}
                           className={cn(
                             "w-full text-right p-4 rounded-xl border transition-all flex items-center justify-between group",
-                            selectedDriver?.id === driver.id 
+                            selectedDriverId === driver.id 
                               ? "bg-blue-50 border-blue-200 text-blue-700" 
                               : "bg-white border-slate-100 hover:border-blue-100 hover:bg-slate-50"
                           )}
@@ -502,7 +557,7 @@ export default function App() {
                               {payrolls[driver.id]?.totalAmount?.toLocaleString() || 0} ج.م
                             </div>
                             <div className="text-[10px] text-slate-400">
-                              {payrolls[driver.id] ? 'تم التسجيل' : 'لم يسجل'}
+                              {!payrolls[driver.id] ? 'لم يسجل' : (payrolls[driver.id].paymentMethod ? 'تم القبض' : 'لم يتم القبض')}
                             </div>
                           </div>
                         </button>
@@ -512,13 +567,14 @@ export default function App() {
               </div>
 
               {/* Payroll Details */}
-              <div className="lg:col-span-8">
+              <div className="lg:col-span-8 no-print">
                 {selectedDriver ? (
                   <PayrollEditor 
                     driver={selectedDriver} 
                     payroll={payrolls[selectedDriver.id]} 
                     onSave={(data) => savePayroll(selectedDriver.id, data)}
                     onCarryOver={() => carryOverRates(selectedDriver.id)}
+                    onPrint={(data) => setPrintData({ driver: selectedDriver, payroll: data })}
                   />
                 ) : (
                   <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-12 flex flex-col items-center justify-center text-slate-400">
@@ -542,9 +598,7 @@ export default function App() {
                 drivers={drivers} 
                 onAdd={addDriver} 
                 onDelete={async (id) => {
-                  if(confirm('هل أنت متأكد من حذف السائق؟')) {
-                    await deleteDoc(doc(db, 'drivers', id));
-                  }
+                  await deleteDoc(doc(db, 'drivers', id));
                 }}
               />
             </motion.div>
@@ -566,6 +620,21 @@ export default function App() {
               />
             </motion.div>
           )}
+
+          {activeTab === 'notes' && (
+            <motion.div 
+              key="notes"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
+              <GeneralNotesView 
+                notes={generalNotes}
+                onAdd={addGeneralNote}
+                onDelete={deleteGeneralNote}
+              />
+            </motion.div>
+          )}
         </AnimatePresence>
 
         {showSettings && (
@@ -578,6 +647,91 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Global Printable Receipt */}
+      {printData && (
+        <div className="print-only print-card bg-white p-8 font-sans" dir="rtl">
+          <div className="text-center border-b-2 border-slate-900 pb-4 mb-6">
+            <h1 className="text-2xl font-bold">شركة وادي النيل</h1>
+            <p className="text-sm">بيان مفردات القبض</p>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            <div><span className="font-bold">السائق:</span> {printData.driver.name}</div>
+            <div><span className="font-bold">الكود:</span> {printData.driver.code}</div>
+            <div><span className="font-bold">المصنع:</span> {printData.driver.factory}</div>
+            <div><span className="font-bold">التاريخ:</span> {format(new Date(), 'yyyy/MM/dd')}</div>
+          </div>
+
+          <table className="w-full border-collapse border border-slate-900 mb-6 text-sm">
+            <thead>
+              <tr className="bg-slate-100">
+                <th className="border border-slate-900 p-2 text-right">البيان</th>
+                <th className="border border-slate-900 p-2 text-center">العدد</th>
+                <th className="border border-slate-900 p-2 text-center">السعر</th>
+                <th className="border border-slate-900 p-2 text-center">الإجمالي</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(printData.payroll.shifts || []).map((s, i) => (
+                <tr key={i}>
+                  <td className="border border-slate-900 p-2">{s.description}</td>
+                  <td className="border border-slate-900 p-2 text-center">{s.count}</td>
+                  <td className="border border-slate-900 p-2 text-center">{s.price}</td>
+                  <td className="border border-slate-900 p-2 text-center">{s.count * s.price}</td>
+                </tr>
+              ))}
+              <tr className="bg-slate-50 font-bold">
+                <td colSpan={3} className="border border-slate-900 p-2 text-left">إجمالي الورادي</td>
+                <td className="border border-slate-900 p-2 text-center">{(printData.payroll.shifts || []).reduce((acc, s) => acc + (s.count * s.price), 0)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div className="grid grid-cols-2 gap-8 mb-6 text-sm">
+            <div>
+              <h3 className="font-bold border-b border-slate-900 mb-2">الخصومات</h3>
+              {(printData.payroll.deductions || []).map((d, i) => (
+                <div key={i} className="flex justify-between py-1">
+                  <span>{d.description}</span>
+                  <span>{d.amount}</span>
+                </div>
+              ))}
+              <div className="flex justify-between font-bold border-t border-slate-900 mt-2 pt-1">
+                <span>الإجمالي</span>
+                <span>{(printData.payroll.deductions || []).reduce((acc, d) => acc + d.amount, 0)}</span>
+              </div>
+            </div>
+            <div>
+              <h3 className="font-bold border-b border-slate-900 mb-2">السلف</h3>
+              {(printData.payroll.advances || []).map((a, i) => (
+                <div key={i} className="flex justify-between py-1">
+                  <span>{a.description}</span>
+                  <span>{a.amount}</span>
+                </div>
+              ))}
+              <div className="flex justify-between font-bold border-t border-slate-900 mt-2 pt-1">
+                <span>الإجمالي</span>
+                <span>{(printData.payroll.advances || []).reduce((acc, a) => acc + a.amount, 0)}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-2 border-slate-900 p-4 rounded-lg text-center">
+            <div className="text-lg font-bold">صافي القبض المستحق: {
+              (printData.payroll.shifts || []).reduce((acc, s) => acc + (s.count * s.price), 0) -
+              (printData.payroll.deductions || []).reduce((acc, d) => acc + d.amount, 0) -
+              (printData.payroll.advances || []).reduce((acc, a) => acc + a.amount, 0)
+            } ج.م</div>
+            <div className="text-sm mt-1">طريقة الدفع: {printData.payroll.paymentMethod || 'لم يحدد'}</div>
+          </div>
+
+          <div className="mt-12 flex justify-between text-sm">
+            <div className="text-center w-32 border-t border-slate-900 pt-2">توقيع السائق</div>
+            <div className="text-center w-32 border-t border-slate-900 pt-2">توقيع الحسابات</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -601,17 +755,19 @@ function TabButton({ active, onClick, icon, label }: { active: boolean, onClick:
   );
 }
 
-function PayrollEditor({ driver, payroll, onSave, onCarryOver }: { 
+function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: { 
   driver: Driver, 
   payroll?: Payroll, 
   onSave: (data: Partial<Payroll>) => void,
-  onCarryOver: () => void
+  onCarryOver: () => void,
+  onPrint: (data: Partial<Payroll>) => void
 }) {
   const [shifts, setShifts] = useState<Shift[]>(payroll?.shifts || []);
   const [deductions, setDeductions] = useState<Deduction[]>(payroll?.deductions || []);
   const [advances, setAdvances] = useState<Advance[]>(payroll?.advances || []);
   const [paymentMethod, setPaymentMethod] = useState(payroll?.paymentMethod || "نقداً");
   const [showPaymentMethod, setShowPaymentMethod] = useState(!!payroll?.paymentMethod);
+  const [driverNotes, setDriverNotes] = useState(driver.notes || '');
   const [isSaving, setIsSaving] = useState(false);
   const receiptRef = React.useRef<HTMLDivElement>(null);
 
@@ -622,6 +778,10 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver }: {
     setPaymentMethod(payroll?.paymentMethod || "نقداً");
     setShowPaymentMethod(!!payroll?.paymentMethod);
   }, [payroll, driver.id]);
+
+  useEffect(() => {
+    setDriverNotes(driver.notes || '');
+  }, [driver.id, driver.notes]);
 
   // Auto-save logic
   useEffect(() => {
@@ -652,7 +812,10 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver }: {
   };
 
   const handlePrint = () => {
-    window.print();
+    onPrint({ shifts, deductions, advances, paymentMethod: showPaymentMethod ? paymentMethod : "" });
+    setTimeout(() => {
+      window.print();
+    }, 100);
   };
 
   const handleSendImage = async () => {
@@ -684,91 +847,6 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver }: {
 
   return (
     <div className="space-y-6">
-      {/* Printable Receipt (Hidden in UI) */}
-      <div ref={receiptRef} className="print-only print-card bg-white p-8 font-sans" dir="rtl">
-        <div className="text-center border-b-2 border-slate-900 pb-4 mb-6">
-          <h1 className="text-2xl font-bold">شركة وادي النيل</h1>
-          <p className="text-sm">بيان مفردات القبض</p>
-        </div>
-        
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div><span className="font-bold">السائق:</span> {driver.name}</div>
-          <div><span className="font-bold">الكود:</span> {driver.code}</div>
-          <div><span className="font-bold">المصنع:</span> {driver.factory}</div>
-          <div><span className="font-bold">التاريخ:</span> {format(new Date(), 'yyyy/MM/dd')}</div>
-        </div>
-
-        <table className="w-full border-collapse border border-slate-900 mb-6 text-sm">
-          <thead>
-            <tr className="bg-slate-100">
-              <th className="border border-slate-900 p-2">البيان</th>
-              <th className="border border-slate-900 p-2">العدد</th>
-              <th className="border border-slate-900 p-2">السعر</th>
-              <th className="border border-slate-900 p-2">الإجمالي</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shifts.map((s, i) => (
-              <tr key={i}>
-                <td className="border border-slate-900 p-2">{s.description}</td>
-                <td className="border border-slate-900 p-2 text-center">{s.count}</td>
-                <td className="border border-slate-900 p-2 text-center">{s.price}</td>
-                <td className="border border-slate-900 p-2 text-center">{s.count * s.price}</td>
-              </tr>
-            ))}
-            <tr className="bg-slate-50 font-bold">
-              <td colSpan={3} className="border border-slate-900 p-2 text-left">إجمالي الورادي</td>
-              <td className="border border-slate-900 p-2 text-center">{totalShifts}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div className="grid grid-cols-2 gap-8 mb-6 text-sm">
-          <div>
-            <h3 className="font-bold border-b border-slate-900 mb-2">الخصومات</h3>
-            {deductions.map((d, i) => (
-              <div key={i} className="flex justify-between py-1">
-                <div className="flex flex-col">
-                  <span>{d.description}</span>
-                  <span className="text-[10px] text-slate-500">{d.date}</span>
-                </div>
-                <span>{d.amount}</span>
-              </div>
-            ))}
-            <div className="flex justify-between font-bold border-t border-slate-900 mt-2 pt-1">
-              <span>الإجمالي</span>
-              <span>{totalDeductions}</span>
-            </div>
-          </div>
-          <div>
-            <h3 className="font-bold border-b border-slate-900 mb-2">السلف</h3>
-            {advances.map((a, i) => (
-              <div key={i} className="flex justify-between py-1">
-                <div className="flex flex-col">
-                  <span>{a.description}</span>
-                  <span className="text-[10px] text-slate-500">{a.date}</span>
-                </div>
-                <span>{a.amount}</span>
-              </div>
-            ))}
-            <div className="flex justify-between font-bold border-t border-slate-900 mt-2 pt-1">
-              <span>الإجمالي</span>
-              <span>{totalAdvances}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="border-2 border-slate-900 p-4 rounded-lg text-center">
-          <div className="text-lg font-bold">صافي القبض المستحق: {finalTotal} ج.م</div>
-          <div className="text-sm mt-1">طريقة الدفع: {paymentMethod || 'لم يحدد'}</div>
-        </div>
-
-        <div className="mt-12 flex justify-between text-sm">
-          <div className="text-center w-32 border-t border-slate-900 pt-2">توقيع السائق</div>
-          <div className="text-center w-32 border-t border-slate-900 pt-2">توقيع الحسابات</div>
-        </div>
-      </div>
-
       {/* UI Editor */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 no-print">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
@@ -786,7 +864,33 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver }: {
               <p className="text-slate-500 text-sm">{driver.factory}</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex-1 max-w-xs no-print">
+            <div className="relative group">
+              <textarea 
+                placeholder="ملاحظات السائق..."
+                value={driverNotes}
+                onChange={(e) => setDriverNotes(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-400 resize-none h-12 pr-8"
+              />
+              <button 
+                onClick={async () => {
+                  try {
+                    setIsSaving(true);
+                    await updateDoc(doc(db, 'drivers', driver.id), { notes: driverNotes });
+                    setTimeout(() => setIsSaving(false), 1000);
+                  } catch (err) {
+                    console.error("Error updating driver notes:", err);
+                    setIsSaving(false);
+                  }
+                }}
+                className="absolute right-2 top-2 text-blue-500 hover:text-blue-700 transition-all opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                title="حفظ الملاحظة"
+              >
+                <Save size={14} />
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 no-print">
             <button 
               onClick={handleSendImage}
               className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-all text-sm font-medium"
@@ -1096,21 +1200,24 @@ function SummaryCard({ label, value, color, highlight }: { label: string, value:
 
 function DriverManagement({ drivers, onAdd, onDelete }: { 
   drivers: Driver[], 
-  onAdd: (code: string, name: string, factory: string) => void,
+  onAdd: (code: string, name: string, factory: string, notes: string) => void,
   onDelete: (id: string) => void
 }) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [factory, setFactory] = useState('');
+  const [notes, setNotes] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (code && name && factory) {
-      onAdd(code, name, factory);
+      onAdd(code, name, factory, notes);
       setCode('');
       setName('');
       setFactory('');
+      setNotes('');
     }
   };
 
@@ -1155,6 +1262,12 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
             className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
             required
           />
+          <textarea 
+            placeholder="ملاحظات السائق (اختياري)"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="sm:col-span-3 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none h-20"
+          />
           <button 
             type="submit"
             className="sm:col-span-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95"
@@ -1183,6 +1296,7 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
               <th className="px-6 py-4 text-sm font-bold text-slate-600">الكود</th>
               <th className="px-6 py-4 text-sm font-bold text-slate-600">اسم السائق</th>
               <th className="px-6 py-4 text-sm font-bold text-slate-600">المصنع</th>
+              <th className="px-6 py-4 text-sm font-bold text-slate-600">الملاحظات</th>
               <th className="px-6 py-4 text-sm font-bold text-slate-600">تاريخ الإضافة</th>
               <th className="px-6 py-4 text-sm font-bold text-slate-600 w-20"></th>
             </tr>
@@ -1193,16 +1307,39 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
                 <td className="px-6 py-4 font-mono text-blue-600">{driver.code}</td>
                 <td className="px-6 py-4 font-medium">{driver.name}</td>
                 <td className="px-6 py-4 text-slate-500">{driver.factory}</td>
+                <td className="px-6 py-4 text-slate-400 text-sm max-w-[200px] truncate" title={driver.notes}>
+                  {driver.notes || '-'}
+                </td>
                 <td className="px-6 py-4 text-slate-400 text-sm">
                   {format(driver.createdAt.toDate(), 'yyyy/MM/dd')}
                 </td>
                 <td className="px-6 py-4">
-                  <button 
-                    onClick={() => onDelete(driver.id)}
-                    className="text-slate-300 hover:text-red-500 transition-all"
-                  >
-                    <Trash2 size={18} />
-                  </button>
+                  {confirmDeleteId === driver.id ? (
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => {
+                          onDelete(driver.id);
+                          setConfirmDeleteId(null);
+                        }}
+                        className="text-red-600 hover:text-red-700 p-1"
+                      >
+                        <CheckCircle2 size={18} />
+                      </button>
+                      <button 
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="text-slate-400 hover:text-slate-600 p-1"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => setConfirmDeleteId(driver.id)}
+                      className="text-slate-300 hover:text-red-500 transition-all"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -1288,6 +1425,125 @@ function ReportsView({ drivers, payrolls, currentMonth, onExport, onImport }: {
               })}
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GeneralNotesView({ notes, onAdd, onDelete }: { 
+  notes: GeneralNote[], 
+  onAdd: (content: string, date: string) => void,
+  onDelete: (id: string) => void 
+}) {
+  const [content, setContent] = useState('');
+  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (content && date) {
+      onAdd(content, date);
+      setContent('');
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-4xl mx-auto">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+        <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+          <Plus size={20} className="text-blue-600" />
+          إضافة ملاحظة عامة
+        </h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="sm:col-span-3">
+              <textarea 
+                placeholder="اكتب الملاحظة هنا..."
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none h-24"
+                required
+              />
+            </div>
+            <div className="sm:col-span-1">
+              <label className="block text-xs font-bold text-slate-400 mb-1 uppercase">التاريخ</label>
+              <input 
+                type="date" 
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                required
+              />
+            </div>
+          </div>
+          <button 
+            type="submit"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2"
+          >
+            <Save size={18} />
+            حفظ الملاحظة
+          </button>
+        </form>
+      </div>
+
+      <div className="space-y-4">
+        <h2 className="text-xl font-bold flex items-center gap-2 text-slate-700">
+          <History size={20} className="text-slate-400" />
+          سجل الملاحظات
+        </h2>
+        <div className="grid gap-4">
+          {notes.map(note => (
+            <motion.div 
+              key={note.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-blue-100 transition-all group"
+            >
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex items-center gap-2 text-blue-600 bg-blue-50 px-3 py-1 rounded-full text-xs font-bold">
+                  <Calendar size={14} />
+                  {format(new Date(note.date), 'yyyy/MM/dd')}
+                </div>
+                <div className="flex items-center gap-2">
+                  {confirmDeleteId === note.id ? (
+                    <div className="flex items-center gap-2 bg-red-50 p-1 rounded-lg">
+                      <span className="text-[10px] text-red-600 font-bold">حذف؟</span>
+                      <button 
+                        onClick={() => {
+                          onDelete(note.id);
+                          setConfirmDeleteId(null);
+                        }}
+                        className="text-red-600 hover:text-red-700 p-1"
+                      >
+                        <CheckCircle2 size={14} />
+                      </button>
+                      <button 
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="text-slate-400 hover:text-slate-600 p-1"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => setConfirmDeleteId(note.id)}
+                      className="text-slate-300 hover:text-red-500 transition-all p-1 opacity-0 group-hover:opacity-100"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">{note.content}</p>
+            </motion.div>
+          ))}
+          {notes.length === 0 && (
+            <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-12 flex flex-col items-center justify-center text-slate-400">
+              <FileText size={48} className="mb-4 opacity-20" />
+              <p>لا توجد ملاحظات عامة مسجلة</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
