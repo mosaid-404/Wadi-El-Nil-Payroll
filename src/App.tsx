@@ -99,7 +99,7 @@ export default function App() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [appSettings, setAppSettings] = useState({ username: 'wadeelnil', password: '100200' });
+  const [appSettings, setAppSettings] = useState({ username: 'wadeelnil', password: '100200', logoUrl: '' });
   const [showSettings, setShowSettings] = useState(false);
 
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -233,16 +233,14 @@ export default function App() {
     }
   };
 
-  // Update Credentials
-  const updateCredentials = async (newUsername: string, newPassword: string) => {
+  // Update Settings
+  const updateSettings = async (updates: Partial<typeof appSettings>) => {
     try {
-      await setDoc(doc(db, 'settings', 'config'), {
-        username: newUsername,
-        password: newPassword
-      });
-      alert("تم تحديث بيانات الدخول بنجاح");
+      const newSettings = { ...appSettings, ...updates };
+      await setDoc(doc(db, 'settings', 'config'), newSettings);
+      alert("تم تحديث الإعدادات بنجاح");
     } catch (err) {
-      console.error("Error updating credentials:", err);
+      console.error("Error updating settings:", err);
       alert("خطأ في تحديث البيانات");
     }
   };
@@ -309,8 +307,12 @@ export default function App() {
           className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-100"
         >
           <div className="flex flex-col items-center mb-8">
-            <div className="w-20 h-20 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg mb-4">
-              <Wallet className="text-white w-10 h-10" />
+            <div className="w-24 h-24 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg mb-4 overflow-hidden">
+              {appSettings.logoUrl ? (
+                <img src={appSettings.logoUrl} alt="Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              ) : (
+                <Wallet className="text-white w-12 h-12" />
+              )}
             </div>
             <h1 className="text-2xl font-bold text-slate-800">شركة وادي النيل</h1>
             <p className="text-slate-500">نظام قبض السائقين</p>
@@ -363,8 +365,12 @@ export default function App() {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-              <Wallet className="text-white w-6 h-6" />
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center overflow-hidden">
+              {appSettings.logoUrl ? (
+                <img src={appSettings.logoUrl} alt="Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              ) : (
+                <Wallet className="text-white w-6 h-6" />
+              )}
             </div>
             <h1 className="text-xl font-bold hidden sm:block">وادي النيل</h1>
           </div>
@@ -467,7 +473,12 @@ export default function App() {
                   <div className="space-y-2 max-h-[60vh] overflow-y-auto custom-scrollbar">
                     {drivers
                       .filter(d => {
-                        const matchesSearch = d.name.includes(searchTerm) || d.factory.includes(searchTerm) || d.code.includes(searchTerm);
+                        const searchWords = (searchTerm || '').toLowerCase().trim().split(/\s+/);
+                        const matchesSearch = searchWords.every(word => 
+                          (d.name || '').toLowerCase().includes(word) || 
+                          (d.factory || '').toLowerCase().includes(word) || 
+                          (d.code || '').toLowerCase().includes(word)
+                        );
                         const matchesFactory = factoryFilter === 'الكل' || d.factory === factoryFilter;
                         return matchesSearch && matchesFactory;
                       })
@@ -562,9 +573,8 @@ export default function App() {
             onClose={() => setShowSettings(false)}
             onExport={exportData}
             onImport={importData}
-            onUpdateCredentials={updateCredentials}
-            currentUsername={appSettings.username}
-            currentPassword={appSettings.password}
+            onUpdateSettings={updateSettings}
+            currentSettings={appSettings}
           />
         )}
       </main>
@@ -1092,6 +1102,7 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [factory, setFactory] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1102,6 +1113,15 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
       setFactory('');
     }
   };
+
+  const filteredDrivers = drivers.filter(d => {
+    const searchWords = (searchTerm || '').toLowerCase().trim().split(/\s+/);
+    return searchWords.every(word => 
+      (d.name || '').toLowerCase().includes(word) || 
+      (d.factory || '').toLowerCase().includes(word) || 
+      (d.code || '').toLowerCase().includes(word)
+    );
+  });
 
   return (
     <div className="space-y-6">
@@ -1145,6 +1165,18 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-4 border-b border-slate-100">
+          <div className="relative">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input 
+              type="text" 
+              placeholder="بحث في السائقين (الاسم، الكود، المصنع)..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pr-10 pl-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+            />
+          </div>
+        </div>
         <table className="w-full text-right">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
@@ -1156,7 +1188,7 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {drivers.map(driver => (
+            {filteredDrivers.map(driver => (
               <tr key={driver.id} className="hover:bg-slate-50 transition-all">
                 <td className="px-6 py-4 font-mono text-blue-600">{driver.code}</td>
                 <td className="px-6 py-4 font-medium">{driver.name}</td>
@@ -1176,8 +1208,8 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
             ))}
           </tbody>
         </table>
-        {drivers.length === 0 && (
-          <div className="p-12 text-center text-slate-400">لا يوجد سائقين حالياً</div>
+        {filteredDrivers.length === 0 && (
+          <div className="p-12 text-center text-slate-400">لا يوجد نتائج للبحث</div>
         )}
       </div>
     </div>
@@ -1266,19 +1298,29 @@ function SettingsModal({
   onClose, 
   onExport, 
   onImport, 
-  onUpdateCredentials,
-  currentUsername,
-  currentPassword
+  onUpdateSettings,
+  currentSettings
 }: { 
   onClose: () => void, 
   onExport: () => void, 
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void,
-  onUpdateCredentials: (u: string, p: string) => void,
-  currentUsername: string,
-  currentPassword: string
+  onUpdateSettings: (updates: any) => void,
+  currentSettings: any
 }) {
-  const [newUsername, setNewUsername] = useState(currentUsername);
-  const [newPassword, setNewPassword] = useState(currentPassword);
+  const [newUsername, setNewUsername] = useState(currentSettings.username);
+  const [newPassword, setNewPassword] = useState(currentSettings.password);
+  const [logoPreview, setLogoPreview] = useState(currentSettings.logoUrl);
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setLogoPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1297,9 +1339,30 @@ function SettingsModal({
           </button>
         </div>
 
-        <div className="p-6 space-y-8">
-          {/* Credentials */}
+        <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
+          {/* Logo Section */}
           <section className="space-y-4">
+            <h3 className="font-bold text-slate-700 flex items-center gap-2">
+              <ImageIcon size={18} className="text-slate-400" />
+              شعار الشركة
+            </h3>
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-24 h-24 bg-slate-100 rounded-2xl border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden">
+                {logoPreview ? (
+                  <img src={logoPreview} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  <ImageIcon size={32} className="text-slate-300" />
+                )}
+              </div>
+              <label className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-bold cursor-pointer hover:bg-blue-100 transition-all">
+                تغيير الشعار
+                <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+              </label>
+            </div>
+          </section>
+
+          {/* Credentials */}
+          <section className="space-y-4 pt-6 border-t border-slate-100">
             <h3 className="font-bold text-slate-700 flex items-center gap-2">
               <Lock size={18} className="text-slate-400" />
               بيانات الدخول
@@ -1326,10 +1389,10 @@ function SettingsModal({
                 />
               </div>
               <button 
-                onClick={() => onUpdateCredentials(newUsername, newPassword)}
+                onClick={() => onUpdateSettings({ username: newUsername, password: newPassword, logoUrl: logoPreview })}
                 className="w-full py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all"
               >
-                تحديث البيانات
+                حفظ الإعدادات
               </button>
             </div>
           </section>
@@ -1354,7 +1417,6 @@ function SettingsModal({
                 <input type="file" accept=".json" onChange={onImport} className="hidden" />
               </label>
             </div>
-            <p className="text-[10px] text-slate-400 text-center">تصدير/استيراد يشمل جميع السائقين والرواتب المسجلة</p>
           </section>
         </div>
       </motion.div>
