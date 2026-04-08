@@ -25,7 +25,8 @@ import {
   Image as ImageIcon,
   X,
   Lock,
-  User
+  User,
+  Edit
 } from 'lucide-react';
 import { 
   collection, 
@@ -201,6 +202,15 @@ export default function App() {
       });
     } catch (err) {
       console.error("Error adding driver:", err);
+    }
+  };
+
+  // Update Driver
+  const updateDriver = async (id: string, data: Partial<Driver>) => {
+    try {
+      await updateDoc(doc(db, 'drivers', id), data);
+    } catch (err) {
+      console.error("Error updating driver:", err);
     }
   };
 
@@ -597,6 +607,7 @@ export default function App() {
               <DriverManagement 
                 drivers={drivers} 
                 onAdd={addDriver} 
+                onUpdate={updateDriver}
                 onDelete={async (id) => {
                   await deleteDoc(doc(db, 'drivers', id));
                 }}
@@ -1031,15 +1042,15 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: {
               </button>
             </div>
             <div className="space-y-2">
-              <div className="grid grid-cols-12 gap-2 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              <div className="hidden sm:grid grid-cols-12 gap-2 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 <div className="col-span-6">البيان</div>
                 <div className="col-span-2 text-center">العدد</div>
                 <div className="col-span-3 text-left">السعر</div>
                 <div className="col-span-1"></div>
               </div>
               {shifts.map((shift, idx) => (
-                <div key={shift.id} className="grid grid-cols-12 gap-2 items-center bg-slate-50 p-2 rounded-xl border border-slate-100 hover:border-blue-200 transition-all">
-                  <div className="col-span-6">
+                <div key={shift.id} className="flex flex-col sm:grid sm:grid-cols-12 gap-2 items-start sm:items-center bg-slate-50 p-3 sm:p-2 rounded-xl border border-slate-100 hover:border-blue-200 transition-all">
+                  <div className="w-full sm:col-span-6">
                     <input 
                       type="text" 
                       placeholder="البيان (اسم الوردية)"
@@ -1049,29 +1060,32 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: {
                         newShifts[idx].description = e.target.value;
                         setShifts(newShifts);
                       }}
-                      className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium"
+                      className="w-full bg-transparent border-none focus:ring-0 text-sm font-bold sm:font-medium"
                     />
                   </div>
-                  <div className="col-span-2">
+                  <div className="flex items-center justify-between w-full sm:w-auto sm:col-span-2">
+                    <span className="sm:hidden text-[10px] font-bold text-slate-400">العدد:</span>
                     {renderNumericInput(shift.count, (val) => {
                       const newShifts = [...shifts];
                       newShifts[idx].count = val;
                       setShifts(newShifts);
-                    }, "0", "text-center")}
+                    }, "0", "text-left sm:text-center w-20 sm:w-full")}
                   </div>
-                  <div className="col-span-3">
+                  <div className="flex items-center justify-between w-full sm:w-auto sm:col-span-3">
+                    <span className="sm:hidden text-[10px] font-bold text-slate-400">السعر:</span>
                     {renderNumericInput(shift.price, (val) => {
                       const newShifts = [...shifts];
                       newShifts[idx].price = val;
                       setShifts(newShifts);
-                    }, "0", "text-left font-bold")}
+                    }, "0", "text-left font-bold w-24 sm:w-full")}
                   </div>
-                  <div className="col-span-1 flex justify-end">
+                  <div className="w-full sm:col-span-1 flex justify-end pt-2 sm:pt-0 border-t sm:border-none border-slate-200 mt-2 sm:mt-0">
                     <button 
                       onClick={() => setShifts(shifts.filter((_, i) => i !== idx))}
-                      className="text-slate-300 hover:text-red-500 transition-all p-1"
+                      className="text-slate-300 hover:text-red-500 transition-all p-1 flex items-center gap-1 sm:block"
                     >
                       <Trash2 size={14} />
+                      <span className="sm:hidden text-xs">حذف البند</span>
                     </button>
                   </div>
                 </div>
@@ -1279,9 +1293,10 @@ function SummaryCard({ label, value, color, highlight }: { label: string, value:
   );
 }
 
-function DriverManagement({ drivers, onAdd, onDelete }: { 
+function DriverManagement({ drivers, onAdd, onUpdate, onDelete }: { 
   drivers: Driver[], 
   onAdd: (code: string, name: string, factory: string, notes: string) => void,
+  onUpdate: (id: string, data: Partial<Driver>) => void,
   onDelete: (id: string) => void
 }) {
   const [code, setCode] = useState('');
@@ -1290,16 +1305,39 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
   const [notes, setNotes] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [editingDriverId, setEditingDriverId] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (code && name && factory) {
-      onAdd(code, name, factory, notes);
+      if (editingDriverId) {
+        onUpdate(editingDriverId, { code, name, factory, notes });
+        setEditingDriverId(null);
+      } else {
+        onAdd(code, name, factory, notes);
+      }
       setCode('');
       setName('');
       setFactory('');
       setNotes('');
     }
+  };
+
+  const startEdit = (driver: Driver) => {
+    setEditingDriverId(driver.id);
+    setCode(driver.code);
+    setName(driver.name);
+    setFactory(driver.factory);
+    setNotes(driver.notes || '');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const cancelEdit = () => {
+    setEditingDriverId(null);
+    setCode('');
+    setName('');
+    setFactory('');
+    setNotes('');
   };
 
   const filteredDrivers = drivers.filter(d => {
@@ -1315,8 +1353,8 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
         <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-          <Plus size={20} className="text-blue-600" />
-          إضافة سائق جديد
+          {editingDriverId ? <Edit size={20} className="text-blue-600" /> : <Plus size={20} className="text-blue-600" />}
+          {editingDriverId ? 'تعديل بيانات السائق' : 'إضافة سائق جديد'}
         </h2>
         <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <input 
@@ -1349,12 +1387,23 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
             onChange={(e) => setNotes(e.target.value)}
             className="sm:col-span-3 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none h-20"
           />
-          <button 
-            type="submit"
-            className="sm:col-span-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95"
-          >
-            إضافة السائق
-          </button>
+          <div className="sm:col-span-3 flex gap-2">
+            <button 
+              type="submit"
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95"
+            >
+              {editingDriverId ? 'حفظ التعديلات' : 'إضافة السائق'}
+            </button>
+            {editingDriverId && (
+              <button 
+                type="button"
+                onClick={cancelEdit}
+                className="px-6 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-3 rounded-xl transition-all active:scale-95"
+              >
+                إلغاء
+              </button>
+            )}
+          </div>
         </form>
       </div>
 
@@ -1371,61 +1420,135 @@ function DriverManagement({ drivers, onAdd, onDelete }: {
             />
           </div>
         </div>
-        <table className="w-full text-right">
-          <thead className="bg-slate-50 border-b border-slate-200">
-            <tr>
-              <th className="px-6 py-4 text-sm font-bold text-slate-600">الكود</th>
-              <th className="px-6 py-4 text-sm font-bold text-slate-600">اسم السائق</th>
-              <th className="px-6 py-4 text-sm font-bold text-slate-600">المصنع</th>
-              <th className="px-6 py-4 text-sm font-bold text-slate-600">الملاحظات</th>
-              <th className="px-6 py-4 text-sm font-bold text-slate-600">تاريخ الإضافة</th>
-              <th className="px-6 py-4 text-sm font-bold text-slate-600 w-20"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredDrivers.map(driver => (
-              <tr key={driver.id} className="hover:bg-slate-50 transition-all">
-                <td className="px-6 py-4 font-mono text-blue-600">{driver.code}</td>
-                <td className="px-6 py-4 font-medium">{driver.name}</td>
-                <td className="px-6 py-4 text-slate-500">{driver.factory}</td>
-                <td className="px-6 py-4 text-slate-400 text-sm max-w-[200px] truncate" title={driver.notes}>
-                  {driver.notes || '-'}
-                </td>
-                <td className="px-6 py-4 text-slate-400 text-sm">
-                  {format(driver.createdAt.toDate(), 'yyyy/MM/dd')}
-                </td>
-                <td className="px-6 py-4">
+
+        {/* Desktop Table */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-right">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600">الكود</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600">اسم السائق</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600">المصنع</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600">الملاحظات</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600">تاريخ الإضافة</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600 w-20"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredDrivers.map(driver => (
+                <tr key={driver.id} className="hover:bg-slate-50 transition-all">
+                  <td className="px-6 py-4 font-mono text-blue-600">{driver.code}</td>
+                  <td className="px-6 py-4 font-medium">{driver.name}</td>
+                  <td className="px-6 py-4 text-slate-500">{driver.factory}</td>
+                  <td className="px-6 py-4 text-slate-400 text-sm max-w-[200px] truncate" title={driver.notes}>
+                    {driver.notes || '-'}
+                  </td>
+                  <td className="px-6 py-4 text-slate-400 text-sm">
+                    {format(driver.createdAt.toDate(), 'yyyy/MM/dd')}
+                  </td>
+                  <td className="px-6 py-4">
+                    {confirmDeleteId === driver.id ? (
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => {
+                            onDelete(driver.id);
+                            setConfirmDeleteId(null);
+                          }}
+                          className="text-red-600 hover:text-red-700 p-1"
+                        >
+                          <CheckCircle2 size={18} />
+                        </button>
+                        <button 
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="text-slate-400 hover:text-slate-600 p-1"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => startEdit(driver)}
+                          className="text-slate-300 hover:text-blue-500 transition-all"
+                          title="تعديل"
+                        >
+                          <Edit size={18} />
+                        </button>
+                        <button 
+                          onClick={() => setConfirmDeleteId(driver.id)}
+                          className="text-slate-300 hover:text-red-500 transition-all"
+                          title="حذف"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile Card List */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {filteredDrivers.map(driver => (
+            <div key={driver.id} className="p-4 space-y-3">
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="font-mono text-blue-600 text-sm font-bold">{driver.code}</div>
+                  <div className="font-bold text-lg">{driver.name}</div>
+                  <div className="text-slate-500 text-sm">{driver.factory}</div>
+                </div>
+                <div>
                   {confirmDeleteId === driver.id ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 bg-red-50 p-2 rounded-xl">
                       <button 
                         onClick={() => {
                           onDelete(driver.id);
                           setConfirmDeleteId(null);
                         }}
-                        className="text-red-600 hover:text-red-700 p-1"
+                        className="text-red-600"
                       >
-                        <CheckCircle2 size={18} />
+                        <CheckCircle2 size={20} />
                       </button>
                       <button 
                         onClick={() => setConfirmDeleteId(null)}
-                        className="text-slate-400 hover:text-slate-600 p-1"
+                        className="text-slate-400"
                       >
-                        <X size={18} />
+                        <X size={20} />
                       </button>
                     </div>
                   ) : (
-                    <button 
-                      onClick={() => setConfirmDeleteId(driver.id)}
-                      className="text-slate-300 hover:text-red-500 transition-all"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => startEdit(driver)}
+                        className="text-slate-300 hover:text-blue-500 p-2"
+                      >
+                        <Edit size={20} />
+                      </button>
+                      <button 
+                        onClick={() => setConfirmDeleteId(driver.id)}
+                        className="text-slate-300 hover:text-red-500 p-2"
+                      >
+                        <Trash2 size={20} />
+                      </button>
+                    </div>
                   )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </div>
+              </div>
+              {driver.notes && (
+                <div className="bg-slate-50 p-3 rounded-xl text-sm text-slate-600 italic">
+                  {driver.notes}
+                </div>
+              )}
+              <div className="text-[10px] text-slate-400 text-left">
+                تاريخ الإضافة: {format(driver.createdAt.toDate(), 'yyyy/MM/dd')}
+              </div>
+            </div>
+          ))}
+        </div>
+
         {filteredDrivers.length === 0 && (
           <div className="p-12 text-center text-slate-400">لا يوجد نتائج للبحث</div>
         )}
