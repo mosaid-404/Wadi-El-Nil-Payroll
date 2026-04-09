@@ -57,6 +57,7 @@ interface Driver {
   name: string;
   factory: string;
   notes?: string;
+  isActive: boolean;
   createdAt: Timestamp;
 }
 
@@ -97,6 +98,7 @@ interface Payroll {
   deductions: Deduction[];
   advances: Advance[];
   paymentMethod: string;
+  previousBalance: number;
   totalAmount: number;
   updatedAt: Timestamp;
 }
@@ -117,7 +119,9 @@ export default function App() {
   const [payrolls, setPayrolls] = useState<Record<string, Payroll>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [factoryFilter, setFactoryFilter] = useState('الكل');
+  const [showInactive, setShowInactive] = useState(false);
   const [activeTab, setActiveTab] = useState<'drivers' | 'payroll' | 'reports' | 'notes'>('payroll');
+  const [tempPreviousBalance, setTempPreviousBalance] = useState<number | null>(null);
   const [generalNotes, setGeneralNotes] = useState<GeneralNote[]>([]);
   const [printData, setPrintData] = useState<{ driver: Driver, payroll: Partial<Payroll> } | null>(null);
 
@@ -179,6 +183,17 @@ export default function App() {
     return () => unsubscribe();
   }, [isLoggedIn, currentMonth]);
 
+  // Fetch previous balance when driver is selected
+  useEffect(() => {
+    if (selectedDriverId && !payrolls[selectedDriverId]) {
+      getPreviousBalance(selectedDriverId).then(balance => {
+        setTempPreviousBalance(balance);
+      });
+    } else {
+      setTempPreviousBalance(null);
+    }
+  }, [selectedDriverId, payrolls, currentMonth]);
+
   // Fetch General Notes
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -198,6 +213,7 @@ export default function App() {
         name,
         factory,
         notes,
+        isActive: true,
         createdAt: Timestamp.now()
       });
     } catch (err) {
@@ -236,6 +252,35 @@ export default function App() {
     }
   };
 
+  // Get the most recent balance before the current month
+  const getPreviousBalance = async (driverId: string) => {
+    try {
+      // We need to find the latest payroll that is NOT the current month/year
+      const q = query(
+        collection(db, 'payrolls'),
+        where('driverId', '==', driverId),
+        orderBy('year', 'desc'),
+        orderBy('month', 'desc')
+      );
+      
+      const snapshot = await getDocs(q);
+      const currentMonthNum = currentMonth.getMonth() + 1;
+      const currentYearNum = currentMonth.getFullYear();
+
+      // Find the first payroll that is before the current month
+      for (const doc of snapshot.docs) {
+        const data = doc.data() as Payroll;
+        if (data.year < currentYearNum || (data.year === currentYearNum && data.month < currentMonthNum)) {
+          return data.totalAmount;
+        }
+      }
+      return 0;
+    } catch (err) {
+      console.error("Error fetching previous balance:", err);
+      return 0;
+    }
+  };
+
   // Update/Create Payroll
   const savePayroll = async (driverId: string, data: Partial<Payroll>) => {
     const month = currentMonth.getMonth() + 1;
@@ -243,10 +288,21 @@ export default function App() {
     const payrollId = `${driverId}_${month}_${year}`;
     
     const currentPayroll = payrolls[driverId];
+    
+    // If previousBalance is not provided, fetch it
+    let previousBalance = data.previousBalance !== undefined ? data.previousBalance : (currentPayroll?.previousBalance ?? 0);
+    
+    // If we don't have a previousBalance in state, try to fetch it from DB
+    if (previousBalance === 0 && !currentPayroll) {
+      previousBalance = await getPreviousBalance(driverId);
+    }
+
     const totalShifts = (data.shifts || currentPayroll?.shifts || []).reduce((acc, s) => acc + (s.count * s.price), 0);
     const totalDeductions = (data.deductions || currentPayroll?.deductions || []).reduce((acc, d) => acc + d.amount, 0);
     const totalAdvances = (data.advances || currentPayroll?.advances || []).reduce((acc, a) => acc + a.amount, 0);
-    const totalAmount = totalShifts - totalDeductions - totalAdvances;
+    
+    // Total Amount = (Current Activity) + Previous Balance
+    const totalAmount = (totalShifts - totalDeductions - totalAdvances) + previousBalance;
 
     const payrollData = {
       driverId,
@@ -256,6 +312,7 @@ export default function App() {
       deductions: data.deductions || currentPayroll?.deductions || [],
       advances: data.advances || currentPayroll?.advances || [],
       paymentMethod: data.paymentMethod !== undefined ? data.paymentMethod : (currentPayroll?.paymentMethod || ""),
+      previousBalance,
       totalAmount,
       updatedAt: Timestamp.now()
     };
@@ -534,6 +591,21 @@ export default function App() {
                         {factories.map(f => <option key={f} value={f}>{f}</option>)}
                       </select>
                     </div>
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                      <span className="text-xs font-bold text-slate-500">إظهار التاركين للعمل:</span>
+                      <button
+                        onClick={() => setShowInactive(!showInactive)}
+                        className={cn(
+                          "w-10 h-5 rounded-full transition-all relative",
+                          showInactive ? "bg-blue-600" : "bg-slate-200"
+                        )}
+                      >
+                        <div className={cn(
+                          "absolute top-1 w-3 h-3 bg-white rounded-full transition-all",
+                          showInactive ? "left-1" : "right-1"
+                        )} />
+                      </button>
+                    </div>
                   </div>
                   <div className="space-y-2 max-h-[60vh] overflow-y-auto custom-scrollbar">
                     {drivers
@@ -545,7 +617,8 @@ export default function App() {
                           (d.code || '').toLowerCase().includes(word)
                         );
                         const matchesFactory = factoryFilter === 'الكل' || d.factory === factoryFilter;
-                        return matchesSearch && matchesFactory;
+                        const matchesStatus = showInactive || d.isActive !== false;
+                        return matchesSearch && matchesFactory && matchesStatus;
                       })
                       .map(driver => (
                         <button
@@ -581,7 +654,7 @@ export default function App() {
                 {selectedDriver ? (
                   <PayrollEditor 
                     driver={selectedDriver} 
-                    payroll={payrolls[selectedDriver.id]} 
+                    payroll={payrolls[selectedDriver.id] || (tempPreviousBalance !== null ? { previousBalance: tempPreviousBalance } as any : undefined)} 
                     onSave={(data) => savePayroll(selectedDriver.id, data)}
                     onCarryOver={() => carryOverRates(selectedDriver.id)}
                     onPrint={(data) => setPrintData({ driver: selectedDriver, payroll: data })}
@@ -729,10 +802,16 @@ export default function App() {
           </div>
 
           <div className="border-2 border-slate-900 p-4 rounded-lg text-center">
+            {printData.payroll.previousBalance !== 0 && (
+              <div className="text-sm mb-2 border-b border-slate-300 pb-2">
+                الرصيد السابق: {printData.payroll.previousBalance} ج.م
+              </div>
+            )}
             <div className="text-lg font-bold">صافي القبض المستحق: {
-              (printData.payroll.shifts || []).reduce((acc, s) => acc + (s.count * s.price), 0) -
+              ((printData.payroll.shifts || []).reduce((acc, s) => acc + (s.count * s.price), 0) -
               (printData.payroll.deductions || []).reduce((acc, d) => acc + d.amount, 0) -
-              (printData.payroll.advances || []).reduce((acc, a) => acc + a.amount, 0)
+              (printData.payroll.advances || []).reduce((acc, a) => acc + a.amount, 0)) +
+              (printData.payroll.previousBalance || 0)
             } ج.م</div>
             <div className="text-sm mt-1">طريقة الدفع: {printData.payroll.paymentMethod || 'لم يحدد'}</div>
           </div>
@@ -777,6 +856,7 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: {
   const [deductions, setDeductions] = useState<Deduction[]>(payroll?.deductions || []);
   const [advances, setAdvances] = useState<Advance[]>(payroll?.advances || []);
   const [paymentMethod, setPaymentMethod] = useState(payroll?.paymentMethod || "نقداً");
+  const [previousBalance, setPreviousBalance] = useState(payroll?.previousBalance || 0);
   const [showPaymentMethod, setShowPaymentMethod] = useState(!!payroll?.paymentMethod);
   const [driverNotes, setDriverNotes] = useState(driver.notes || '');
   const [isSaving, setIsSaving] = useState(false);
@@ -787,6 +867,7 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: {
     setDeductions(payroll?.deductions || []);
     setAdvances(payroll?.advances || []);
     setPaymentMethod(payroll?.paymentMethod || "نقداً");
+    setPreviousBalance(payroll?.previousBalance || 0);
     setShowPaymentMethod(!!payroll?.paymentMethod);
   }, [payroll, driver.id]);
 
@@ -805,7 +886,7 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: {
 
       if (hasChanges) {
         setIsSaving(true);
-        onSave({ shifts, deductions, advances, paymentMethod: showPaymentMethod ? paymentMethod : "" });
+        onSave({ shifts, deductions, advances, paymentMethod: showPaymentMethod ? paymentMethod : "", previousBalance });
         setTimeout(() => setIsSaving(false), 1000);
       }
     }, 1500);
@@ -816,14 +897,15 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: {
   const totalShifts = shifts.reduce((acc, s) => acc + (s.count * s.price), 0);
   const totalDeductions = deductions.reduce((acc, d) => acc + d.amount, 0);
   const totalAdvances = advances.reduce((acc, a) => acc + a.amount, 0);
-  const finalTotal = totalShifts - totalDeductions - totalAdvances;
+  const currentActivity = totalShifts - totalDeductions - totalAdvances;
+  const finalTotal = currentActivity + previousBalance;
 
   const handleSave = () => {
-    onSave({ shifts, deductions, advances, paymentMethod: showPaymentMethod ? paymentMethod : "" });
+    onSave({ shifts, deductions, advances, paymentMethod: showPaymentMethod ? paymentMethod : "", previousBalance });
   };
 
   const handlePrint = () => {
-    onPrint({ shifts, deductions, advances, paymentMethod: showPaymentMethod ? paymentMethod : "" });
+    onPrint({ shifts, deductions, advances, paymentMethod: showPaymentMethod ? paymentMethod : "", previousBalance });
     setTimeout(() => {
       window.print();
     }, 100);
@@ -1023,6 +1105,24 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: {
           <SummaryCard label="إجمالي السلف" value={totalAdvances} color="orange" />
           <SummaryCard label="صافي القبض" value={finalTotal} color="green" highlight />
         </div>
+
+        {previousBalance !== 0 && (
+          <div className={cn(
+            "mb-6 p-4 rounded-xl border flex items-center justify-between no-print",
+            previousBalance < 0 ? "bg-red-50 border-red-100 text-red-700" : "bg-blue-50 border-blue-100 text-blue-700"
+          )}>
+            <div className="flex items-center gap-3">
+              <AlertCircle size={20} />
+              <div>
+                <div className="font-bold text-sm">
+                  {previousBalance < 0 ? "مديونية مرحلة من شهور سابقة" : "رصيد دائن مرحل من شهور سابقة"}
+                </div>
+                <div className="text-xs opacity-80">يتم إضافة هذا المبلغ تلقائياً لصافي القبض النهائي</div>
+              </div>
+            </div>
+            <div className="text-lg font-bold">{previousBalance} ج.م</div>
+          </div>
+        )}
 
         {/* Sections */}
         <div className="space-y-8">
@@ -1299,27 +1399,52 @@ function DriverManagement({ drivers, onAdd, onUpdate, onDelete }: {
   onUpdate: (id: string, data: Partial<Driver>) => void,
   onDelete: (id: string) => void
 }) {
-  const [code, setCode] = useState('');
+  const suggestedNextCode = useMemo(() => {
+    if (drivers.length === 0) return '1';
+    const numericCodes = drivers
+      .map(d => parseInt(d.code))
+      .filter(n => !isNaN(n));
+    if (numericCodes.length === 0) return '1';
+    return (Math.max(...numericCodes) + 1).toString();
+  }, [drivers]);
+
+  const uniqueFactories = useMemo(() => {
+    return Array.from(new Set(drivers.map(d => d.factory).filter(Boolean))).sort();
+  }, [drivers]);
+
+  const [code, setCode] = useState(suggestedNextCode);
   const [name, setName] = useState('');
   const [factory, setFactory] = useState('');
   const [notes, setNotes] = useState('');
+  const [isActive, setIsActive] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<'name' | 'factory' | 'code'>('code');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [editingDriverId, setEditingDriverId] = useState<string | null>(null);
+
+  // Update code if it's empty and we have a suggestion
+  useEffect(() => {
+    if (!editingDriverId && !code && suggestedNextCode) {
+      setCode(suggestedNextCode);
+    }
+  }, [suggestedNextCode, editingDriverId, code]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (code && name && factory) {
       if (editingDriverId) {
-        onUpdate(editingDriverId, { code, name, factory, notes });
+        onUpdate(editingDriverId, { code, name, factory, notes, isActive });
         setEditingDriverId(null);
+        setCode(suggestedNextCode);
       } else {
         onAdd(code, name, factory, notes);
+        // After adding, the next suggestion will update via the useMemo/useEffect
+        setCode(''); 
       }
-      setCode('');
       setName('');
       setFactory('');
       setNotes('');
+      setIsActive(true);
     }
   };
 
@@ -1329,25 +1454,47 @@ function DriverManagement({ drivers, onAdd, onUpdate, onDelete }: {
     setName(driver.name);
     setFactory(driver.factory);
     setNotes(driver.notes || '');
+    setIsActive(driver.isActive ?? true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const cancelEdit = () => {
     setEditingDriverId(null);
-    setCode('');
+    setCode(suggestedNextCode);
     setName('');
     setFactory('');
     setNotes('');
+    setIsActive(true);
   };
 
-  const filteredDrivers = drivers.filter(d => {
-    const searchWords = (searchTerm || '').toLowerCase().trim().split(/\s+/);
-    return searchWords.every(word => 
-      (d.name || '').toLowerCase().includes(word) || 
-      (d.factory || '').toLowerCase().includes(word) || 
-      (d.code || '').toLowerCase().includes(word)
-    );
-  });
+  const filteredDrivers = useMemo(() => {
+    const filtered = drivers.filter(d => {
+      const searchWords = (searchTerm || '').toLowerCase().trim().split(/\s+/);
+      return searchWords.every(word => 
+        (d.name || '').toLowerCase().includes(word) || 
+        (d.factory || '').toLowerCase().includes(word) || 
+        (d.code || '').toLowerCase().includes(word)
+      );
+    });
+
+    return [...filtered].sort((a, b) => {
+      if (sortBy === 'name') {
+        return (a.name || '').localeCompare(b.name || '', 'ar');
+      }
+      if (sortBy === 'factory') {
+        const factoryCompare = (a.factory || '').localeCompare(b.factory || '', 'ar');
+        if (factoryCompare !== 0) return factoryCompare;
+        return (a.name || '').localeCompare(b.name || '', 'ar');
+      }
+      if (sortBy === 'code') {
+        const aCode = parseInt(a.code) || 0;
+        const bCode = parseInt(b.code) || 0;
+        if (aCode !== bCode) return aCode - bCode;
+        return a.code.localeCompare(b.code);
+      }
+      return 0;
+    });
+  }, [drivers, searchTerm, sortBy]);
 
   return (
     <div className="space-y-6">
@@ -1379,14 +1526,37 @@ function DriverManagement({ drivers, onAdd, onUpdate, onDelete }: {
             value={factory}
             onChange={(e) => setFactory(e.target.value)}
             className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+            list="factories-list"
             required
           />
+          <datalist id="factories-list">
+            {uniqueFactories.map(f => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
           <textarea 
             placeholder="ملاحظات السائق (اختياري)"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             className="sm:col-span-3 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none h-20"
           />
+          {editingDriverId && (
+            <div className="sm:col-span-3 flex items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
+              <span className="text-sm font-bold text-slate-700">حالة السائق:</span>
+              <button
+                type="button"
+                onClick={() => setIsActive(!isActive)}
+                className={cn(
+                  "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                  isActive 
+                    ? "bg-green-100 text-green-700 border border-green-200" 
+                    : "bg-red-100 text-red-700 border border-red-200"
+                )}
+              >
+                {isActive ? "على رأس العمل" : "ترك العمل"}
+              </button>
+            </div>
+          )}
           <div className="sm:col-span-3 flex gap-2">
             <button 
               type="submit"
@@ -1409,15 +1579,29 @@ function DriverManagement({ drivers, onAdd, onUpdate, onDelete }: {
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-100">
-          <div className="relative">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              placeholder="بحث في السائقين (الاسم، الكود، المصنع)..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pr-10 pl-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-            />
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                type="text" 
+                placeholder="بحث في السائقين (الاسم، الكود، المصنع)..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pr-10 pl-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-500 whitespace-nowrap">ترتيب حسب:</span>
+              <select 
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="code">الكود</option>
+                <option value="name">الاسم (أبجدي)</option>
+                <option value="factory">المصنع (أبجدي)</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -1429,6 +1613,7 @@ function DriverManagement({ drivers, onAdd, onUpdate, onDelete }: {
                 <th className="px-6 py-4 text-sm font-bold text-slate-600">الكود</th>
                 <th className="px-6 py-4 text-sm font-bold text-slate-600">اسم السائق</th>
                 <th className="px-6 py-4 text-sm font-bold text-slate-600">المصنع</th>
+                <th className="px-6 py-4 text-sm font-bold text-slate-600">الحالة</th>
                 <th className="px-6 py-4 text-sm font-bold text-slate-600">الملاحظات</th>
                 <th className="px-6 py-4 text-sm font-bold text-slate-600">تاريخ الإضافة</th>
                 <th className="px-6 py-4 text-sm font-bold text-slate-600 w-20"></th>
@@ -1440,6 +1625,14 @@ function DriverManagement({ drivers, onAdd, onUpdate, onDelete }: {
                   <td className="px-6 py-4 font-mono text-blue-600">{driver.code}</td>
                   <td className="px-6 py-4 font-medium">{driver.name}</td>
                   <td className="px-6 py-4 text-slate-500">{driver.factory}</td>
+                  <td className="px-6 py-4">
+                    <span className={cn(
+                      "px-2 py-1 rounded-full text-[10px] font-bold",
+                      driver.isActive !== false ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                    )}>
+                      {driver.isActive !== false ? "نشط" : "ترك العمل"}
+                    </span>
+                  </td>
                   <td className="px-6 py-4 text-slate-400 text-sm max-w-[200px] truncate" title={driver.notes}>
                     {driver.notes || '-'}
                   </td>
@@ -1497,7 +1690,15 @@ function DriverManagement({ drivers, onAdd, onUpdate, onDelete }: {
               <div className="flex justify-between items-start">
                 <div>
                   <div className="font-mono text-blue-600 text-sm font-bold">{driver.code}</div>
-                  <div className="font-bold text-lg">{driver.name}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-bold text-lg">{driver.name}</div>
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-full text-[10px] font-bold",
+                      driver.isActive !== false ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                    )}>
+                      {driver.isActive !== false ? "نشط" : "ترك العمل"}
+                    </span>
+                  </div>
                   <div className="text-slate-500 text-sm">{driver.factory}</div>
                 </div>
                 <div>
