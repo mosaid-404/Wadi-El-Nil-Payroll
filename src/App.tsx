@@ -129,7 +129,19 @@ export default function App() {
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'settings', 'config'), (doc) => {
       if (doc.exists()) {
-        setAppSettings(doc.data() as any);
+        const data = doc.data() as any;
+        setAppSettings(data);
+        
+        // Update Favicon and Meta Tags dynamically
+        if (data.logoUrl) {
+          const favicon = document.getElementById('favicon') as HTMLLinkElement;
+          const ogImage = document.getElementById('og-image') as HTMLMetaElement;
+          const twitterImage = document.getElementById('twitter-image') as HTMLMetaElement;
+          
+          if (favicon) favicon.href = data.logoUrl;
+          if (ogImage) ogImage.content = data.logoUrl;
+          if (twitterImage) twitterImage.content = data.logoUrl;
+        }
       }
     });
     return () => unsub();
@@ -658,6 +670,7 @@ export default function App() {
                     onSave={(data) => savePayroll(selectedDriver.id, data)}
                     onCarryOver={() => carryOverRates(selectedDriver.id)}
                     onPrint={(data) => setPrintData({ driver: selectedDriver, payroll: data })}
+                    appSettings={appSettings}
                   />
                 ) : (
                   <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-12 flex flex-col items-center justify-center text-slate-400">
@@ -735,9 +748,16 @@ export default function App() {
       {/* Global Printable Receipt */}
       {printData && (
         <div className="print-only print-card bg-white p-8 font-sans" dir="rtl">
-          <div className="text-center border-b-2 border-slate-900 pb-4 mb-6">
-            <h1 className="text-2xl font-bold">شركة وادي النيل</h1>
-            <p className="text-sm">بيان مفردات القبض</p>
+          <div className="flex justify-between items-center border-b-2 border-slate-900 pb-4 mb-6">
+            <div className="text-right">
+              <h1 className="text-2xl font-bold">شركة وادي النيل</h1>
+              <p className="text-sm">بيان مفردات القبض</p>
+            </div>
+            {appSettings.logoUrl && (
+              <div className="w-20 h-20 overflow-hidden rounded-lg border border-slate-200">
+                <img src={appSettings.logoUrl} alt="Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              </div>
+            )}
           </div>
           
           <div className="grid grid-cols-2 gap-4 mb-6">
@@ -845,12 +865,13 @@ function TabButton({ active, onClick, icon, label }: { active: boolean, onClick:
   );
 }
 
-function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: { 
+function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSettings }: { 
   driver: Driver, 
   payroll?: Payroll, 
   onSave: (data: Partial<Payroll>) => void,
   onCarryOver: () => void,
-  onPrint: (data: Partial<Payroll>) => void
+  onPrint: (data: Partial<Payroll>) => void,
+  appSettings: any
 }) {
   const [shifts, setShifts] = useState<Shift[]>(payroll?.shifts || []);
   const [deductions, setDeductions] = useState<Deduction[]>(payroll?.deductions || []);
@@ -943,9 +964,16 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint }: {
       {/* Hidden Receipt for Image Generation */}
       <div className="fixed -left-[9999px] top-0 no-print">
         <div ref={receiptRef} className="bg-white p-8 w-[800px] font-sans" dir="rtl">
-          <div className="text-center border-b-2 border-slate-900 pb-4 mb-6">
-            <h1 className="text-2xl font-bold">شركة وادي النيل</h1>
-            <p className="text-sm">بيان مفردات القبض</p>
+          <div className="flex justify-between items-center border-b-2 border-slate-900 pb-4 mb-6">
+            <div className="text-right">
+              <h1 className="text-2xl font-bold">شركة وادي النيل</h1>
+              <p className="text-sm">بيان مفردات القبض</p>
+            </div>
+            {appSettings.logoUrl && (
+              <div className="w-20 h-20 overflow-hidden rounded-lg border border-slate-200">
+                <img src={appSettings.logoUrl} alt="Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              </div>
+            )}
           </div>
           
           <div className="grid grid-cols-2 gap-4 mb-6">
