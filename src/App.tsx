@@ -1175,6 +1175,32 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSetti
               <p className="text-slate-500 text-sm">{driver.factory}</p>
             </div>
           </div>
+          <div className="flex-1 max-w-xs no-print">
+            <div className="relative group">
+              <textarea 
+                placeholder="ملاحظات السائق..."
+                value={driverNotes}
+                onChange={(e) => setDriverNotes(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-400 resize-none h-12 pr-8"
+              />
+              <button 
+                onClick={async () => {
+                  try {
+                    setIsSaving(true);
+                    await updateDoc(doc(db, 'drivers', driver.id), { notes: driverNotes });
+                    setTimeout(() => setIsSaving(false), 1000);
+                  } catch (err) {
+                    console.error("Error updating driver notes:", err);
+                    setIsSaving(false);
+                  }
+                }}
+                className="absolute right-2 top-2 text-blue-500 hover:text-blue-700 transition-all opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                title="حفظ الملاحظة"
+              >
+                <Save size={14} />
+              </button>
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2 no-print">
             <button 
               onClick={handleSendImage}
@@ -1461,40 +1487,6 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSetti
               </div>
             </section>
           </div>
-
-          {/* Driver Notes Section */}
-          <section className="pt-6 border-t border-slate-100">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold flex items-center gap-2 text-slate-700">
-                <FileText size={18} className="text-slate-400" />
-                ملاحظات خاصة بالسائق
-              </h3>
-              <button 
-                onClick={async () => {
-                  try {
-                    setIsSaving(true);
-                    await updateDoc(doc(db, 'drivers', driver.id), { notes: driverNotes });
-                    setTimeout(() => setIsSaving(false), 1000);
-                  } catch (err) {
-                    console.error("Error updating driver notes:", err);
-                    setIsSaving(false);
-                  }
-                }}
-                className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all text-xs font-bold"
-              >
-                <Save size={14} />
-                حفظ الملاحظة
-              </button>
-            </div>
-            <div className="relative">
-              <textarea 
-                placeholder="اكتب هنا أي ملاحظات إضافية عن السائق (تظهر في ملفه الشخصي)..."
-                value={driverNotes}
-                onChange={(e) => setDriverNotes(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-400 resize-none h-24 transition-all"
-              />
-            </div>
-          </section>
 
           {/* Payment Method Flow */}
           <section className="pt-6 border-t border-slate-100">
