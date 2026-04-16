@@ -26,7 +26,10 @@ import {
   X,
   Lock,
   User,
-  Edit
+  Edit,
+  Wifi,
+  WifiOff,
+  Database
 } from 'lucide-react';
 import { 
   collection, 
@@ -124,6 +127,51 @@ export default function App() {
   const [tempPreviousBalance, setTempPreviousBalance] = useState<number | null>(null);
   const [generalNotes, setGeneralNotes] = useState<GeneralNote[]>([]);
   const [printData, setPrintData] = useState<{ driver: Driver, payroll: Partial<Payroll> } | null>(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [showStatusToast, setShowStatusToast] = useState(false);
+
+  // Track online status
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setShowStatusToast(true);
+      setTimeout(() => setShowStatusToast(false), 3000);
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setShowStatusToast(true);
+      setTimeout(() => setShowStatusToast(false), 3000);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // LocalStorage Backup for Payrolls
+  useEffect(() => {
+    if (Object.keys(payrolls).length > 0) {
+      localStorage.setItem('payrolls_backup', JSON.stringify(payrolls));
+    }
+  }, [payrolls]);
+
+  // Load from backup if offline and no data
+  useEffect(() => {
+    if (!isOnline && Object.keys(payrolls).length === 0) {
+      const backup = localStorage.getItem('payrolls_backup');
+      if (backup) {
+        try {
+          setPayrolls(JSON.parse(backup));
+        } catch (e) {
+          console.error("Failed to load payrolls backup", e);
+        }
+      }
+    }
+  }, [isOnline]);
 
   // Fetch Settings
   useEffect(() => {
@@ -424,6 +472,42 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  const exportToCSV = () => {
+    try {
+      const month = currentMonth.getMonth() + 1;
+      const year = currentMonth.getFullYear();
+      
+      // Prepare CSV content
+      let csvContent = "الكود,الاسم,المصنع,إجمالي الورادي,إجمالي الخصومات,إجمالي السلف,الرصيد السابق,صافي القبض\n";
+      
+      drivers.forEach(driver => {
+        const payroll = payrolls[driver.id];
+        if (payroll) {
+          const totalShifts = (payroll.shifts || []).reduce((acc, s) => acc + (s.count * s.price), 0);
+          const totalDeductions = (payroll.deductions || []).reduce((acc, d) => acc + d.amount, 0);
+          const totalAdvances = (payroll.advances || []).reduce((acc, a) => acc + a.amount, 0);
+          const finalTotal = (totalShifts - totalDeductions - totalAdvances) + (payroll.previousBalance || 0);
+          
+          csvContent += `${driver.code},${driver.name},${driver.factory},${totalShifts},${totalDeductions},${totalAdvances},${payroll.previousBalance || 0},${finalTotal}\n`;
+        }
+      });
+
+      // Create blob and download
+      const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", `payroll_backup_${month}_${year}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error("Export error:", err);
+      alert("خطأ في تصدير البيانات");
+    }
+  };
+
   const factories = useMemo(() => ['الكل', ...new Set(drivers.map(d => d.factory))], [drivers]);
 
   if (!isLoggedIn) {
@@ -504,6 +588,13 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
+            <div className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all no-print",
+              isOnline ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
+            )}>
+              {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
+              {isOnline ? "متصل" : "غير متصل"}
+            </div>
             <button 
               onClick={() => setShowSettings(true)}
               className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
@@ -571,6 +662,21 @@ export default function App() {
         </div>
 
         <AnimatePresence mode="wait">
+          {showStatusToast && (
+            <motion.div
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className={cn(
+                "fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-2xl shadow-xl flex items-center gap-3 font-bold text-sm no-print",
+                isOnline ? "bg-green-600 text-white" : "bg-red-600 text-white"
+              )}
+            >
+              {isOnline ? <Wifi size={18} /> : <WifiOff size={18} />}
+              {isOnline ? "تم استعادة الاتصال - جاري المزامنة" : "أنت تعمل الآن بدون إنترنت - سيتم الحفظ محلياً"}
+            </motion.div>
+          )}
+
           {activeTab === 'payroll' && (
             <motion.div 
               key="payroll"
@@ -671,6 +777,7 @@ export default function App() {
                     onCarryOver={() => carryOverRates(selectedDriver.id)}
                     onPrint={(data) => setPrintData({ driver: selectedDriver, payroll: data })}
                     appSettings={appSettings}
+                    isOnline={isOnline}
                   />
                 ) : (
                   <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-12 flex flex-col items-center justify-center text-slate-400">
@@ -738,6 +845,7 @@ export default function App() {
           <SettingsModal 
             onClose={() => setShowSettings(false)}
             onExport={exportData}
+            onExportCSV={exportToCSV}
             onImport={importData}
             onUpdateSettings={updateSettings}
             currentSettings={appSettings}
@@ -865,13 +973,14 @@ function TabButton({ active, onClick, icon, label }: { active: boolean, onClick:
   );
 }
 
-function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSettings }: { 
+function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSettings, isOnline }: { 
   driver: Driver, 
   payroll?: Payroll, 
   onSave: (data: Partial<Payroll>) => void,
   onCarryOver: () => void,
   onPrint: (data: Partial<Payroll>) => void,
-  appSettings: any
+  appSettings: any,
+  isOnline: boolean
 }) {
   const [shifts, setShifts] = useState<Shift[]>(payroll?.shifts || []);
   const [deductions, setDeductions] = useState<Deduction[]>(payroll?.deductions || []);
@@ -1066,32 +1175,6 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSetti
               <p className="text-slate-500 text-sm">{driver.factory}</p>
             </div>
           </div>
-          <div className="flex-1 max-w-xs no-print">
-            <div className="relative group">
-              <textarea 
-                placeholder="ملاحظات السائق..."
-                value={driverNotes}
-                onChange={(e) => setDriverNotes(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-400 resize-none h-12 pr-8"
-              />
-              <button 
-                onClick={async () => {
-                  try {
-                    setIsSaving(true);
-                    await updateDoc(doc(db, 'drivers', driver.id), { notes: driverNotes });
-                    setTimeout(() => setIsSaving(false), 1000);
-                  } catch (err) {
-                    console.error("Error updating driver notes:", err);
-                    setIsSaving(false);
-                  }
-                }}
-                className="absolute right-2 top-2 text-blue-500 hover:text-blue-700 transition-all opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                title="حفظ الملاحظة"
-              >
-                <Save size={14} />
-              </button>
-            </div>
-          </div>
           <div className="flex flex-wrap gap-2 no-print">
             <button 
               onClick={handleSendImage}
@@ -1126,6 +1209,14 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSetti
           </div>
         </div>
 
+        {/* Offline Warning for Editor */}
+        {!isOnline && (
+          <div className="mb-6 p-3 bg-amber-50 border border-amber-100 rounded-xl flex items-center gap-3 text-amber-700 text-xs font-bold no-print">
+            <AlertCircle size={16} />
+            تنبيه: أنت تعمل بدون إنترنت. سيتم حفظ التغييرات في المتصفح ومزامنتها تلقائياً عند عودة الاتصال.
+          </div>
+        )}
+
         {/* Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
           <SummaryCard label="إجمالي الورادي" value={totalShifts} color="blue" />
@@ -1156,29 +1247,32 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSetti
         <div className="space-y-8">
           {/* Shifts */}
           <section>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
               <h3 className="font-bold flex items-center gap-2 text-slate-700">
                 <Calendar size={18} className="text-blue-500" />
                 الورادي والبيانات
               </h3>
-              <button 
-                onClick={() => setShifts([...shifts, { id: Math.random().toString(), description: '', count: 1, price: 0 }])}
-                className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all text-xs font-bold"
-              >
-                <Plus size={14} />
-                إضافة بند
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button 
+                  onClick={() => setShifts([...shifts, { id: Math.random().toString(), description: '', count: 1, price: 0 }])}
+                  className="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-all text-xs font-bold shadow-sm"
+                >
+                  <Plus size={14} />
+                  إضافة بند
+                </button>
+              </div>
             </div>
             <div className="space-y-2">
               <div className="hidden sm:grid grid-cols-12 gap-2 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                <div className="col-span-6">البيان</div>
+                <div className="col-span-5">البيان</div>
                 <div className="col-span-2 text-center">العدد</div>
-                <div className="col-span-3 text-left">السعر</div>
+                <div className="col-span-2 text-center">السعر</div>
+                <div className="col-span-2 text-left">الإجمالي</div>
                 <div className="col-span-1"></div>
               </div>
               {shifts.map((shift, idx) => (
-                <div key={shift.id} className="flex flex-col sm:grid sm:grid-cols-12 gap-2 items-start sm:items-center bg-slate-50 p-3 sm:p-2 rounded-xl border border-slate-100 hover:border-blue-200 transition-all">
-                  <div className="w-full sm:col-span-6">
+                <div key={shift.id} className="flex flex-col sm:grid sm:grid-cols-12 gap-2 items-start sm:items-center bg-white p-3 sm:p-2 rounded-xl border border-slate-100 hover:border-blue-200 transition-all shadow-sm">
+                  <div className="w-full sm:col-span-5">
                     <input 
                       type="text" 
                       placeholder="البيان (اسم الوردية)"
@@ -1191,15 +1285,15 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSetti
                       className="w-full bg-transparent border-none focus:ring-0 text-sm font-bold sm:font-medium"
                     />
                   </div>
-                  <div className="flex items-center justify-between w-full sm:w-auto sm:col-span-2">
+                  <div className="flex items-center justify-between w-full sm:w-auto sm:col-span-2 bg-slate-50 sm:bg-transparent p-2 sm:p-0 rounded-lg">
                     <span className="sm:hidden text-[10px] font-bold text-slate-400">العدد:</span>
                     {renderNumericInput(shift.count, (val) => {
                       const newShifts = [...shifts];
                       newShifts[idx].count = val;
                       setShifts(newShifts);
-                    }, "0", "text-left sm:text-center w-20 sm:w-full")}
+                    }, "0", "text-left sm:text-center w-20 sm:w-full font-bold")}
                   </div>
-                  <div className="flex items-center justify-between w-full sm:w-auto sm:col-span-3">
+                  <div className="flex items-center justify-between w-full sm:w-auto sm:col-span-2 bg-slate-50 sm:bg-transparent p-2 sm:p-0 rounded-lg">
                     <span className="sm:hidden text-[10px] font-bold text-slate-400">السعر:</span>
                     {renderNumericInput(shift.price, (val) => {
                       const newShifts = [...shifts];
@@ -1207,13 +1301,17 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSetti
                       setShifts(newShifts);
                     }, "0", "text-left font-bold w-24 sm:w-full")}
                   </div>
-                  <div className="w-full sm:col-span-1 flex justify-end pt-2 sm:pt-0 border-t sm:border-none border-slate-200 mt-2 sm:mt-0">
+                  <div className="flex items-center justify-between w-full sm:w-auto sm:col-span-2 px-2">
+                    <span className="sm:hidden text-[10px] font-bold text-slate-400">الإجمالي:</span>
+                    <span className="text-sm font-bold text-blue-600">{(shift.count * shift.price).toLocaleString()} <span className="text-[10px]">ج.م</span></span>
+                  </div>
+                  <div className="w-full sm:col-span-1 flex justify-end pt-2 sm:pt-0 border-t sm:border-none border-slate-100 mt-2 sm:mt-0">
                     <button 
                       onClick={() => setShifts(shifts.filter((_, i) => i !== idx))}
                       className="text-slate-300 hover:text-red-500 transition-all p-1 flex items-center gap-1 sm:block"
                     >
                       <Trash2 size={14} />
-                      <span className="sm:hidden text-xs">حذف البند</span>
+                      <span className="sm:hidden text-xs">حذف</span>
                     </button>
                   </div>
                 </div>
@@ -1232,56 +1330,64 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSetti
                 </h3>
                 <button 
                   onClick={() => setDeductions([...deductions, { id: Math.random().toString(), amount: 0, description: '', date: format(new Date(), 'yyyy-MM-dd') }])}
-                  className="flex items-center gap-1 px-3 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-all text-xs font-bold"
+                  className="flex items-center gap-1 px-3 py-1 bg-red-600 text-white rounded-full hover:bg-red-700 transition-all text-xs font-bold shadow-sm"
                 >
                   <Plus size={14} />
-                  خصم
+                  إضافة خصم
                 </button>
               </div>
               <div className="space-y-3">
                 {deductions.map((d, idx) => (
                   <div key={d.id} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm space-y-3 hover:border-red-200 transition-all">
                     <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-400">المبلغ:</span>
+                      <div className="flex items-center gap-2 bg-red-50 px-3 py-1 rounded-lg">
+                        <span className="text-xs font-bold text-red-400">المبلغ:</span>
                         {renderNumericInput(d.amount, (val) => {
                           const newD = [...deductions];
                           newD[idx].amount = val;
                           setDeductions(newD);
-                        }, "0", "font-bold text-red-600 w-20 text-lg")}
+                        }, "0", "font-bold text-red-600 w-24 text-lg")}
+                        <span className="text-[10px] font-bold text-red-400">ج.م</span>
                       </div>
                       <button 
                         onClick={() => setDeductions(deductions.filter((_, i) => i !== idx))}
-                        className="text-slate-300 hover:text-red-500 transition-all p-1"
+                        className="text-slate-300 hover:text-red-500 transition-all p-2 hover:bg-red-50 rounded-full"
                       >
                         <Trash2 size={16} />
                       </button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <input 
-                        type="text" 
-                        placeholder="البيان (سبب الخصم)"
-                        value={d.description}
-                        onChange={(e) => {
-                          const newD = [...deductions];
-                          newD[idx].description = e.target.value;
-                          setDeductions(newD);
-                        }}
-                        className="w-full bg-slate-50 px-3 py-2 rounded-lg border border-slate-100 focus:ring-2 focus:ring-red-500 outline-none text-sm"
-                      />
-                      <input 
-                        type="date" 
-                        value={d.date}
-                        onChange={(e) => {
-                          const newD = [...deductions];
-                          newD[idx].date = e.target.value;
-                          setDeductions(newD);
-                        }}
-                        className="w-full bg-slate-50 px-3 py-2 rounded-lg border border-slate-100 focus:ring-2 focus:ring-red-500 outline-none text-sm"
-                      />
+                      <div className="relative">
+                        <FileText className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+                        <input 
+                          type="text" 
+                          placeholder="البيان (سبب الخصم)"
+                          value={d.description}
+                          onChange={(e) => {
+                            const newD = [...deductions];
+                            newD[idx].description = e.target.value;
+                            setDeductions(newD);
+                          }}
+                          className="w-full bg-slate-50 pr-9 pl-3 py-2 rounded-lg border border-slate-100 focus:ring-2 focus:ring-red-500 outline-none text-sm"
+                        />
+                      </div>
+                      <div className="relative">
+                        <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+                        <input 
+                          type="date" 
+                          value={d.date}
+                          onChange={(e) => {
+                            const newD = [...deductions];
+                            newD[idx].date = e.target.value;
+                            setDeductions(newD);
+                          }}
+                          className="w-full bg-slate-50 pr-9 pl-3 py-2 rounded-lg border border-slate-100 focus:ring-2 focus:ring-red-500 outline-none text-sm"
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
+                {deductions.length === 0 && <p className="text-center text-slate-400 text-xs py-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">لا توجد خصومات</p>}
               </div>
             </section>
 
@@ -1294,59 +1400,101 @@ function PayrollEditor({ driver, payroll, onSave, onCarryOver, onPrint, appSetti
                 </h3>
                 <button 
                   onClick={() => setAdvances([...advances, { id: Math.random().toString(), amount: 0, description: '', date: format(new Date(), 'yyyy-MM-dd') }])}
-                  className="flex items-center gap-1 px-3 py-1 bg-orange-50 text-orange-600 rounded-lg hover:bg-orange-100 transition-all text-xs font-bold"
+                  className="flex items-center gap-1 px-3 py-1 bg-orange-600 text-white rounded-full hover:bg-orange-700 transition-all text-xs font-bold shadow-sm"
                 >
                   <Plus size={14} />
-                  سلفة
+                  إضافة سلفة
                 </button>
               </div>
               <div className="space-y-3">
                 {advances.map((a, idx) => (
                   <div key={a.id} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm space-y-3 hover:border-orange-200 transition-all">
                     <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-400">المبلغ:</span>
+                      <div className="flex items-center gap-2 bg-orange-50 px-3 py-1 rounded-lg">
+                        <span className="text-xs font-bold text-orange-400">المبلغ:</span>
                         {renderNumericInput(a.amount, (val) => {
                           const newA = [...advances];
                           newA[idx].amount = val;
                           setAdvances(newA);
-                        }, "0", "font-bold text-orange-600 w-20 text-lg")}
+                        }, "0", "font-bold text-orange-600 w-24 text-lg")}
+                        <span className="text-[10px] font-bold text-orange-400">ج.م</span>
                       </div>
                       <button 
                         onClick={() => setAdvances(advances.filter((_, i) => i !== idx))}
-                        className="text-slate-300 hover:text-orange-500 transition-all p-1"
+                        className="text-slate-300 hover:text-orange-500 transition-all p-2 hover:bg-orange-50 rounded-full"
                       >
                         <Trash2 size={16} />
                       </button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <input 
-                        type="text" 
-                        placeholder="البيان (سبب السلفة)"
-                        value={a.description}
-                        onChange={(e) => {
-                          const newA = [...advances];
-                          newA[idx].description = e.target.value;
-                          setAdvances(newA);
-                        }}
-                        className="w-full bg-slate-50 px-3 py-2 rounded-lg border border-slate-100 focus:ring-2 focus:ring-orange-500 outline-none text-sm"
-                      />
-                      <input 
-                        type="date" 
-                        value={a.date}
-                        onChange={(e) => {
-                          const newA = [...advances];
-                          newA[idx].date = e.target.value;
-                          setAdvances(newA);
-                        }}
-                        className="w-full bg-slate-50 px-3 py-2 rounded-lg border border-slate-100 focus:ring-2 focus:ring-orange-500 outline-none text-sm"
-                      />
+                      <div className="relative">
+                        <FileText className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+                        <input 
+                          type="text" 
+                          placeholder="البيان (سبب السلفة)"
+                          value={a.description}
+                          onChange={(e) => {
+                            const newA = [...advances];
+                            newA[idx].description = e.target.value;
+                            setAdvances(newA);
+                          }}
+                          className="w-full bg-slate-50 pr-9 pl-3 py-2 rounded-lg border border-slate-100 focus:ring-2 focus:ring-orange-500 outline-none text-sm"
+                        />
+                      </div>
+                      <div className="relative">
+                        <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+                        <input 
+                          type="date" 
+                          value={a.date}
+                          onChange={(e) => {
+                            const newA = [...advances];
+                            newA[idx].date = e.target.value;
+                            setAdvances(newA);
+                          }}
+                          className="w-full bg-slate-50 pr-9 pl-3 py-2 rounded-lg border border-slate-100 focus:ring-2 focus:ring-orange-500 outline-none text-sm"
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
+                {advances.length === 0 && <p className="text-center text-slate-400 text-xs py-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">لا توجد سلف</p>}
               </div>
             </section>
           </div>
+
+          {/* Driver Notes Section */}
+          <section className="pt-6 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold flex items-center gap-2 text-slate-700">
+                <FileText size={18} className="text-slate-400" />
+                ملاحظات خاصة بالسائق
+              </h3>
+              <button 
+                onClick={async () => {
+                  try {
+                    setIsSaving(true);
+                    await updateDoc(doc(db, 'drivers', driver.id), { notes: driverNotes });
+                    setTimeout(() => setIsSaving(false), 1000);
+                  } catch (err) {
+                    console.error("Error updating driver notes:", err);
+                    setIsSaving(false);
+                  }
+                }}
+                className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all text-xs font-bold"
+              >
+                <Save size={14} />
+                حفظ الملاحظة
+              </button>
+            </div>
+            <div className="relative">
+              <textarea 
+                placeholder="اكتب هنا أي ملاحظات إضافية عن السائق (تظهر في ملفه الشخصي)..."
+                value={driverNotes}
+                onChange={(e) => setDriverNotes(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-400 resize-none h-24 transition-all"
+              />
+            </div>
+          </section>
 
           {/* Payment Method Flow */}
           <section className="pt-6 border-t border-slate-100">
@@ -1986,12 +2134,14 @@ function GeneralNotesView({ notes, onAdd, onDelete }: {
 function SettingsModal({ 
   onClose, 
   onExport, 
+  onExportCSV,
   onImport, 
   onUpdateSettings,
   currentSettings
 }: { 
   onClose: () => void, 
   onExport: () => void, 
+  onExportCSV: () => void,
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void,
   onUpdateSettings: (updates: any) => void,
   currentSettings: any
@@ -2090,21 +2240,32 @@ function SettingsModal({
           <section className="space-y-4 pt-6 border-t border-slate-100">
             <h3 className="font-bold text-slate-700 flex items-center gap-2">
               <Download size={18} className="text-slate-400" />
-              النسخ الاحتياطي
+              النسخ الاحتياطي والمزامنة
             </h3>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={onExport}
+                  className="flex items-center justify-center gap-2 py-3 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-all text-sm font-bold"
+                  title="تصدير كملف JSON"
+                >
+                  <Download size={18} />
+                  تصدير JSON
+                </button>
+                <label className="flex items-center justify-center gap-2 py-3 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-all text-sm font-bold cursor-pointer">
+                  <Upload size={18} />
+                  استيراد JSON
+                  <input type="file" accept=".json" onChange={onImport} className="hidden" />
+                </label>
+              </div>
+              
               <button 
-                onClick={onExport}
-                className="flex items-center justify-center gap-2 py-3 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-all text-sm font-bold"
+                onClick={onExportCSV}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-green-50 text-green-700 rounded-xl hover:bg-green-100 transition-all text-sm font-bold"
               >
-                <Download size={18} />
-                تصدير البيانات
+                <Database size={18} />
+                تصدير البيانات احتياطياً (Excel/CSV)
               </button>
-              <label className="flex items-center justify-center gap-2 py-3 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-all text-sm font-bold cursor-pointer">
-                <Upload size={18} />
-                استيراد البيانات
-                <input type="file" accept=".json" onChange={onImport} className="hidden" />
-              </label>
             </div>
           </section>
         </div>
