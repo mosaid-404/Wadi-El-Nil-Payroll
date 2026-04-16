@@ -2,7 +2,7 @@
   "name": "وادي النيل - نظام القبض",
   "short_name": "وادي النيل",
   "description": "نظام احترافي لإدارة قبض سائقي شركة وادي النيل",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#2563eb",

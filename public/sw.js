@@ -1,8 +1,8 @@
 const CACHE_NAME = 'wadi-el-nil-v1';
 const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json'
+  './',
+  'index.html',
+  'manifest.json'
 ];
 
 // Install Event

@@ -4,22 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>وادي النيل - نظام القبض</title>
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="manifest" href="manifest.json" />
     <meta name="theme-color" content="#2563eb" />
-    <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link id="favicon" rel="icon" type="image/png" href="/favicon.ico" />
-    <meta id="og-image" property="og:image" content="/logo.png" />
-    <meta id="twitter-image" name="twitter:image" content="/logo.png" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <link id="favicon" rel="icon" type="image/png" href="favicon.ico" />
+    <meta id="og-image" property="og:image" content="logo.png" />
+    <meta id="twitter-image" name="twitter:image" content="logo.png" />
     <meta property="og:title" content="وادي النيل - نظام القبض" />
     <meta property="og:description" content="نظام احترافي لإدارة قبض سائقي شركة وادي النيل" />
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
+          navigator.serviceWorker.register('sw.js')
             .then(reg => console.log('Service Worker registered', reg))
             .catch(err => console.log('Service Worker registration failed', err));
         });
